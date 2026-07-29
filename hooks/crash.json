@@ -1,0 +1,40 @@
+{
+  "hooks": [
+    {
+      "name": "segfault",
+      "pattern": "Segmentation fault|SIGSEGV|signal 11",
+      "action": "pause",
+      "description": "Segfault — pause queue, log core dump"
+    },
+    {
+      "name": "abort",
+      "pattern": "SIGABRT|signal 6|abort\\(\\)",
+      "action": "pause",
+      "description": "Abort — pause queue, investigate"
+    },
+    {
+      "name": "panic",
+      "pattern": "panic:|thread '.*' panicked at",
+      "action": "error_recursion",
+      "description": "Rust panic — feed to model for fix"
+    },
+    {
+      "name": "timeout",
+      "pattern": "timed? ?out|Timeout|killed by signal",
+      "action": "error_recursion",
+      "description": "Timeout — retry with longer timeout"
+    },
+    {
+      "name": "permission_denied",
+      "pattern": "Permission denied|Operation not permitted",
+      "action": "log",
+      "description": "Permission denied — log and continue"
+    },
+    {
+      "name": "connection_refused",
+      "pattern": "Connection refused|Connection reset",
+      "action": "error_recursion",
+      "description": "Connection refused — retry with delay"
+    }
+  ]
+}

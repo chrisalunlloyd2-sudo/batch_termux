@@ -1,0 +1,40 @@
+{
+  "hooks": [
+    {
+      "name": "rust_compile_error",
+      "pattern": "error\\[E\\d{4}\\]:",
+      "action": "error_recursion",
+      "description": "Rust compiler error — feed to model for fix"
+    },
+    {
+      "name": "rust_warning",
+      "pattern": "warning:",
+      "action": "log",
+      "description": "Rust compiler warning — log only"
+    },
+    {
+      "name": "python_syntax_error",
+      "pattern": "SyntaxError:",
+      "action": "error_recursion",
+      "description": "Python syntax error — feed to model"
+    },
+    {
+      "name": "python_import_error",
+      "pattern": "ImportError:|ModuleNotFoundError:",
+      "action": "error_recursion",
+      "description": "Python import error — try pip install"
+    },
+    {
+      "name": "linker_error",
+      "pattern": "ld: cannot find|undefined reference",
+      "action": "error_recursion",
+      "description": "Linker error — missing library"
+    },
+    {
+      "name": "test_failure",
+      "pattern": "FAILED|test.*failed|assertion.*failed",
+      "action": "error_recursion",
+      "description": "Test failure — feed to model"
+    }
+  ]
+}

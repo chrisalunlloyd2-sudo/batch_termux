@@ -1,0 +1,28 @@
+{
+  "hooks": [
+    {
+      "name": "oom_kill",
+      "pattern": "Killed process|Out of memory|oom-killer|OOM",
+      "action": "emergency_cleanup",
+      "description": "Out of memory — flush caches, reduce parallelism"
+    },
+    {
+      "name": "swap_exhausted",
+      "pattern": "swap.*full|no swap space",
+      "action": "emergency_cleanup",
+      "description": "Swap exhausted — emergency memory recovery"
+    },
+    {
+      "name": "memory_pressure",
+      "pattern": "memory.*allocation|cannot allocate memory",
+      "action": "pause",
+      "description": "Memory allocation failure — pause and reduce load"
+    },
+    {
+      "name": "disk_full",
+      "pattern": "No space left on device|Disk quota exceeded",
+      "action": "emergency_cleanup",
+      "description": "Disk full — clean temp files, remove caches"
+    }
+  ]
+}
