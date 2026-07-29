@@ -1,7 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # batch_termux — Persistent Background Daemon
-# Runs the Rust core + Python cascade in background
-# Auto-restarts on crash
+# v0.3 — Dashboard support, oomph-aware, auto-restart
 
 BATCH_DIR="${BATCH_DIR:-$HOME/.batch_termux}"
 BATCH_PID_FILE="$BATCH_DIR/batch_daemon.pid"
@@ -22,16 +21,17 @@ daemon_start() {
     
     echo "Starting batch_termux daemon..."
     
-    # Start Rust core (if compiled)
-    if [ -f "$BATCH_DIR/libbatch_rust.so" ]; then
-        echo "  Rust core available (libbatch_rust.so)"
-    else
-        echo "  Rust core not compiled — using Python-only mode"
+    # Read oomph mode
+    local oomph="normal"
+    if [ -f "$BATCH_DIR/oomph_mode.txt" ]; then
+        oomph=$(cat "$BATCH_DIR/oomph_mode.txt")
     fi
+    echo "  Oomph mode: $oomph"
     
-    # Start Python cascade watcher
+    # Start Python daemon
     nohup python3 -c "
-import sys, time, json, subprocess, logging
+import sys, time, json, subprocess, logging, os, socket
+
 sys.path.insert(0, '$BATCH_DIR/python-cascade')
 from cascade import AutomationCascade, CascadeStage
 from error_feedback import ErrorFeedbackEngine
@@ -40,11 +40,14 @@ logging.basicConfig(filename='$BATCH_LOG', level=logging.INFO,
     format='%(asctime)s [DAEMON] %(message)s')
 log = logging.getLogger('daemon')
 
-log.info('batch_termux daemon started')
+log.info('batch_termux daemon started (oomph=$oomph)')
 engine = ErrorFeedbackEngine()
 
-# Watch for commands on socket
-import socket, os
+# Read oomph mode
+oomph_file = '$BATCH_DIR/oomph_mode.txt'
+oomph = '$oomph'
+
+# Unix socket
 try:
     os.unlink('$BATCH_SOCKET')
 except: pass
@@ -60,15 +63,37 @@ while True:
     try:
         conn, addr = server.accept()
         data = conn.recv(4096).decode().strip()
-        if data:
-            log.info(f'Received: {data}')
+        
+        if data.startswith('oomph:'):
+            # Oomph mode change
+            oomph = data[6:]
+            with open(oomph_file, 'w') as f:
+                f.write(oomph)
+            log.info(f'Oomph changed to: {oomph}')
+            conn.sendall(json.dumps({'status': 'ok', 'oomph': oomph}).encode())
+        elif data == 'status':
+            # Status request
+            status = {
+                'oomph': oomph,
+                'uptime': time.time(),
+                'errors': engine.unresolved_count(),
+                'pid': os.getpid(),
+            }
+            conn.sendall(json.dumps(status).encode())
+        elif data:
+            # Command execution
+            log.info(f'Received: {data[:80]}')
             result = subprocess.run(data, shell=True, capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 fix = engine.process(data, result.stdout, result.stderr, [])
                 if fix:
-                    log.info(f'Retrying with fix: {fix}')
-                    subprocess.run(fix, shell=True, capture_output=True, text=True, timeout=60)
-            conn.sendall(json.dumps({'exit': result.returncode, 'stdout': result.stdout[:500]}).encode())
+                    log.info(f'Retrying with fix: {fix[:80]}')
+                    result = subprocess.run(fix, shell=True, capture_output=True, text=True, timeout=60)
+            conn.sendall(json.dumps({
+                'exit': result.returncode,
+                'stdout': result.stdout[:1000],
+                'stderr': result.stderr[:500],
+            }).encode())
         conn.close()
     except socket.timeout:
         continue
@@ -81,6 +106,7 @@ while True:
     echo "$pid" > "$BATCH_PID_FILE"
     echo "batch_termux daemon started (PID $pid)"
     echo "  Socket: $BATCH_SOCKET"
+    echo "  Oomph:  $oomph"
     echo "  Log:    $BATCH_LOG"
 }
 
@@ -100,7 +126,10 @@ daemon_status() {
     if [ -f "$BATCH_PID_FILE" ]; then
         local pid=$(cat "$BATCH_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
+            local oomph="normal"
+            [ -f "$BATCH_DIR/oomph_mode.txt" ] && oomph=$(cat "$BATCH_DIR/oomph_mode.txt")
             echo "batch_termux daemon: RUNNING (PID $pid)"
+            echo "  Oomph:  $oomph"
             echo "  Uptime: $(ps -o etime= -p $pid 2>/dev/null | tr -d ' ')"
             echo "  Memory: $(ps -o rss= -p $pid 2>/dev/null | tr -d ' ') KB"
             echo "  Socket: $BATCH_SOCKET"

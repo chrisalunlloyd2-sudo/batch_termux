@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # batch_termux — Termux Button Hooks
-# v0.2 — Oomph pacing controls, quorum voting, agent routing
+# v0.3 — Dashboard, oomph pacing, quorum voting, agent routing
 
 BATCH_DIR="${BATCH_DIR:-$HOME/.batch_termux}"
 BATCH_LOG="$BATCH_DIR/logs/buttons.log"
@@ -9,7 +9,7 @@ BATCH_OOMPH="${BATCH_OOMPH:-normal}"
 
 mkdir -p "$BATCH_DIR/logs"
 
-# ── Oomph Pacing Modes ──────────────────────────────────────
+# ── Oomph Pacing ────────────────────────────────────────────
 
 batch_set_oomph() {
     local mode="${1:-normal}"
@@ -18,20 +18,29 @@ batch_set_oomph() {
             export BATCH_OOMPH="$mode"
             echo "$mode" > "$BATCH_DIR/oomph_mode.txt"
             echo "Oomph set to: $mode"
-            # Notify Rust pacer if socket available
             if [ -S "$BATCH_SOCKET" ]; then
                 echo "oomph:$mode" | nc -q0 -U "$BATCH_SOCKET" 2>/dev/null
             fi
             ;;
         *)
             echo "Usage: batch_set_oomph {aggressive|normal|conservative|stealth}"
-            echo ""
             echo "  aggressive   — Full speed, push hard, 5 retries"
             echo "  normal       — Balanced, 3 retries (default)"
             echo "  conservative — Careful, 2 retries, quick to pause"
             echo "  stealth      — Minimal resource use, 1 retry"
             return 1
             ;;
+    esac
+}
+
+batch_cycle_oomph() {
+    local current="${BATCH_OOMPH:-normal}"
+    case "$current" in
+        aggressive)  batch_set_oomph "normal" ;;
+        normal)      batch_set_oomph "conservative" ;;
+        conservative) batch_set_oomph "stealth" ;;
+        stealth)     batch_set_oomph "aggressive" ;;
+        *)           batch_set_oomph "normal" ;;
     esac
 }
 
@@ -57,38 +66,15 @@ batch_oomph_desc() {
     esac
 }
 
-# ── Button Bindings ──────────────────────────────────────────
+# ── Dashboard ───────────────────────────────────────────────
 
-batch_button_help() {
-    echo "╔══════════════════════════════════════════════╗"
-    echo "║  batch_termux — Button Bindings             ║"
-    echo "╠══════════════════════════════════════════════╣"
-    echo "║  Ctrl+Shift+B  — Run current batch script   ║"
-    echo "║  Ctrl+Shift+T  — Run test suite             ║"
-    echo "║  Ctrl+Shift+C  — Run cascade                 ║"
-    echo "║  Ctrl+Shift+S  — Show resource status        ║"
-    echo "║  Ctrl+Shift+E  — Show error history          ║"
-    echo "║  Ctrl+Shift+R  — Retry last failed command   ║"
-    echo "║  Ctrl+Shift+K  — Kill stuck process          ║"
-    echo "║  Ctrl+Shift+O  — Cycle oomph mode            ║"
-    echo "║  Ctrl+Shift+Q  — Quit batch daemon           ║"
-    echo "║  Ctrl+Shift+H  — This help                   ║"
-    echo "╚══════════════════════════════════════════════╝"
-}
-
-# ── Batch Command Queue ─────────────────────────────────────
-
-batch_queue() {
-    local cmd="$*"
-    echo "[$(date +%H:%M:%S)] QUEUE: $cmd" >> "$BATCH_LOG"
-    
-    if [ -S "$BATCH_SOCKET" ]; then
-        echo "$cmd" | nc -q0 -U "$BATCH_SOCKET" 2>/dev/null
-        return $?
+batch_dashboard() {
+    local dash="$BATCH_DIR/python-cascade/dashboard.py"
+    if [ -f "$dash" ]; then
+        python3 "$dash"
+    else
+        echo "Dashboard not found at $dash"
     fi
-    
-    echo "Running: $cmd"
-    eval "$cmd"
 }
 
 # ── Resource Monitor ─────────────────────────────────────────
@@ -171,7 +157,21 @@ batch_errors() {
     fi
 }
 
-# ── Last Command Retry ──────────────────────────────────────
+# ── Command Queue ────────────────────────────────────────────
+
+batch_queue() {
+    local cmd="$*"
+    echo "[$(date +%H:%M:%S)] QUEUE: $cmd" >> "$BATCH_LOG"
+    echo "$cmd" > "$BATCH_DIR/last_command.txt"
+    
+    if [ -S "$BATCH_SOCKET" ]; then
+        echo "$cmd" | nc -q0 -U "$BATCH_SOCKET" 2>/dev/null
+        return $?
+    fi
+    
+    echo "Running: $cmd"
+    eval "$cmd"
+}
 
 batch_retry() {
     local last_cmd_file="$BATCH_DIR/last_command.txt"
@@ -184,35 +184,41 @@ batch_retry() {
     fi
 }
 
-# ── Kill Stuck Process ──────────────────────────────────────
-
 batch_kill() {
     echo "Finding stuck processes..."
-    ps aux | grep -E "batch|python3.*cascade|python3.*test" | grep -v grep
+    ps aux | grep -E "batch|python3.*cascade|python3.*test|python3.*dashboard" | grep -v grep
     echo ""
     read -p "Kill all batch processes? (y/N): " confirm
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         pkill -f "batch_termux" 2>/dev/null
         pkill -f "python3.*cascade" 2>/dev/null
         pkill -f "python3.*test_suite" 2>/dev/null
+        pkill -f "python3.*dashboard" 2>/dev/null
         echo "Done."
     fi
 }
 
-# ── Cycle Oomph Mode ─────────────────────────────────────────
+# ── Help ─────────────────────────────────────────────────────
 
-batch_cycle_oomph() {
-    local current="${BATCH_OOMPH:-normal}"
-    case "$current" in
-        aggressive)  batch_set_oomph "normal" ;;
-        normal)      batch_set_oomph "conservative" ;;
-        conservative) batch_set_oomph "stealth" ;;
-        stealth)     batch_set_oomph "aggressive" ;;
-        *)           batch_set_oomph "normal" ;;
-    esac
+batch_button_help() {
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║  batch_termux — Button Bindings             ║"
+    echo "╠══════════════════════════════════════════════╣"
+    echo "║  Ctrl+Shift+B  — Run current batch script   ║"
+    echo "║  Ctrl+Shift+T  — Run test suite             ║"
+    echo "║  Ctrl+Shift+C  — Run cascade                 ║"
+    echo "║  Ctrl+Shift+D  — Dashboard (real-time TUI)  ║"
+    echo "║  Ctrl+Shift+S  — Show resource status        ║"
+    echo "║  Ctrl+Shift+E  — Show error history          ║"
+    echo "║  Ctrl+Shift+R  — Retry last failed command   ║"
+    echo "║  Ctrl+Shift+K  — Kill stuck process          ║"
+    echo "║  Ctrl+Shift+O  — Cycle oomph mode            ║"
+    echo "║  Ctrl+Shift+Q  — Quit batch daemon           ║"
+    echo "║  Ctrl+Shift+H  — This help                   ║"
+    echo "╚══════════════════════════════════════════════╝"
 }
 
-# ── Key Bindings ─────────────────────────────────────────────
+# ── Setup Keys ──────────────────────────────────────────────
 
 batch_setup_keys() {
     local props="$HOME/.termux/termux.properties"
@@ -242,6 +248,9 @@ batch_button() {
     case "$action" in
         help|h|-h|--help)
             batch_button_help
+            ;;
+        dashboard|d)
+            batch_dashboard
             ;;
         status|s)
             batch_status
