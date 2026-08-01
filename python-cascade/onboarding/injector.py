@@ -30,8 +30,9 @@ class OnboardingInjector:
             str(Path.home() / ".batch_termux" / "logs" / "decisions.jsonl"),
         ]
 
-    def boarding_pass(self, model, hex_str, role, mission=""):
-        """Generate the pass via onboard.py (or built-in fallback)."""
+    def boarding_pass(self, model, hex_str, role, mission="", board_id=None):
+        """Generate the pass via onboard.py (or built-in fallback).
+        Returns (text, board_id)."""
         if os.path.exists(ONBOARD_SCRIPT):
             try:
                 env = dict(os.environ)
@@ -42,11 +43,17 @@ class OnboardingInjector:
                        "--mission", mission or "Await instructions within visible hexes."]
                 r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
                 if r.returncode == 0 and r.stdout.strip():
-                    return r.stdout.strip()
+                    # board id comes on stderr as: [onboard] BOARD ID: BP-XXXX
+                    bid = board_id
+                    if r.stderr:
+                        for line in r.stderr.splitlines():
+                            if "BOARD ID:" in line:
+                                bid = line.split("BOARD ID:")[-1].strip()
+                                break
+                    return r.stdout.strip(), bid
             except Exception as e:
                 print(f"[onboarding] onboard.py failed ({e}) — using fallback", file=sys.stderr)
-        # built-in fallback
-        return self._fallback_pass(model, hex_str, role, mission)
+        return self._fallback_pass(model, hex_str, role, mission), board_id
 
     def _fallback_pass(self, model, hex_str, role, mission):
         cont = self.read_continuity()
@@ -81,8 +88,13 @@ class OnboardingInjector:
         return out[-limit:]
 
     def pre_invoke(self, model, hex_str, role, mission=""):
-        """Returns the boarding-pass prefix to prepend to a model prompt."""
-        return self.boarding_pass(model, hex_str, role, mission) + "\n\n"
+        """Returns (boarding-pass prefix, board_id) to prepend to a model prompt."""
+        text, bid = self.boarding_pass(model, hex_str, role, mission)
+        return text + "\n\n", bid
+
+    def is_verification(self, reply):
+        """Check if a model reply is the onboarding verification (board id)."""
+        return bool(reply and reply.strip().startswith("BP-"))
 
 # CLI
 if __name__ == "__main__":
@@ -95,7 +107,8 @@ if __name__ == "__main__":
     p.add_argument("--prompt", help="optional user prompt to append after the pass")
     args = p.parse_args()
     inj = OnboardingInjector()
-    text = inj.pre_invoke(args.model, args.hex, args.role, args.mission)
+    text, bid = inj.pre_invoke(args.model, args.hex, args.role, args.mission)
+    print(f"BOARD ID: {bid}", file=sys.stderr)
     if args.prompt:
         text += args.prompt + "\n"
     print(text)

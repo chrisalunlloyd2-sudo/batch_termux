@@ -58,3 +58,11 @@ python3 SIMS1337/scripts/toc_tok/toc_tok.py search markov
 ```
 Every project/phase/task is a node anchored to a hex. Models navigate by
 tree path AND by space. Onboarding = tree + map + continuity = orientation.
+
+## Enhanced onboarding (v2)
+- **BOARD ID** — every spawn gets a unique `BP-XXXX` id (printed to stderr)
+- **Hex claim** — onboarding claims the hex in claims.json (who's working where)
+- **Tree sync** — TOC-TOK tree touched with `last_onboarded` after spawn
+- **Verification poll** — pass ends with "reply with your BOARD ID to confirm
+  receipt"; `injector.is_verification(reply)` detects the confirmation so the
+  daemon can log verified spawns and proceed only after orientation lands
